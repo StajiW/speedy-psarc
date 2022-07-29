@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as aesjs from 'aes-js'
 import { unzipSync } from 'zlib'
+import { X509Certificate } from 'crypto'
 
 const KEY = aesjs.utils.hex.toBytes('C53DB23870A1A2F71CAE64061FDD0E1157309DC85204D4C5BFDF25090DF2572C')
 const IV = aesjs.utils.hex.toBytes('E915AA018FEF71FC508132E4BB4CEB42')
@@ -22,6 +23,12 @@ type Block = {
 type Version = {
     major: number,
     minor: number
+}
+
+type PathName = {
+    key: string,
+    name: string,
+    songKey: string
 }
 
 class FileReader {
@@ -85,6 +92,78 @@ class PSARC extends FileReader {
         return this.readBlock(this.blocks[manifestFileIndex])
     }
 
+    public getFirstSongManifest(): Buffer {
+        const index = this.files.findIndex(file => file.match(/^manifests\/songs.*.json$/))
+        return this.readBlock(this.blocks[index])
+    }
+
+    public getPathNames(): PathName[] {
+        const indexes = this.getPathManifestIndexes()
+        const pathNames: PathName[] = []
+
+        for (let index of indexes) {
+            const block = this.blocks[index]
+            const buffer = this.readBlock(block)
+
+            try {
+                const pathName = this.getPathName(buffer)
+                pathNames.push(pathName)
+            } catch (error) {
+                if (error !== 'vocals') throw error
+            }
+        }
+
+        const uniqueSongKeys: string[] = [...new Set(pathNames.map(x => x.songKey))]
+
+        for (let songKey of uniqueSongKeys) {
+            const songPathNames = pathNames.filter(x => x.songKey === songKey)
+            const uniquePathNames: string[] = [...new Set(songPathNames.map(x => x.name))]
+
+            for (let pathName of uniquePathNames) {
+                const names = songPathNames.filter(x => x.name === pathName)
+                if (names.length <= 1) continue
+    
+                for (let i = 0; i < names.length; i++) {
+                    names[i].name += ` ${i + 1}`
+                }
+            }
+        }
+
+        return pathNames
+    }
+
+    private getPathManifestIndexes(): number[] {
+        const indexes: number[] = []
+
+        for (let i = 0; i < this.files.length; i++) {
+            if (this.files[i].match(/^manifests\/songs.*.json$/)) indexes.push(i + 1)
+        }
+
+        return indexes
+    }
+
+    private getPathName(buffer: Buffer): PathName {
+        let name: string = ''
+        const obj = JSON.parse(buffer.toString())
+        const entryKey = Object.keys(obj.Entries)[0]
+        const attributes = obj.Entries[entryKey].Attributes
+        if (attributes.ArrangementName === 'Vocals') throw 'vocals'
+        const properties = attributes.ArrangementProperties
+
+        if (properties.represent === 0)         name += 'Alternate '
+        else if (properties.bonusArr === 1)     name += 'Bonus '
+
+        if (properties.pathLead === 1)          name += 'Lead'
+        else if (properties.pathRhythm === 1)   name += 'Rhythm'
+        else if (properties.pathBass === 1)     name += 'Bass'
+
+        return {
+            key: entryKey,
+            name: name,
+            songKey: attributes.SongKey
+        }
+    }
+
     private readHeader() {
         if (this.readString(4) !== 'PSAR') throw 'magic does not equal PSAR'
         this.version = { major: this.readShort(), minor: this.readShort() }
@@ -128,7 +207,7 @@ class PSARC extends FileReader {
         return Buffer.from(res.slice(0, this.toc.length))
     }
 
-    private readBlock(block: Block): Buffer {
+    private readBlock(block: Block, sectionSize: number = 0): Buffer {
         let buffer = Buffer.alloc(0)
 
         let offset = block.fileOffset
@@ -163,13 +242,30 @@ function main() {
         try {
             const file = fs.readFileSync(process.argv[2])
             const psarc = new PSARC(file)
+
             const manifest = psarc.getManifest()
-            fs.writeFileSync('manifest.json', manifest.toString('utf-8'))
+            const manifestObj = JSON.parse(manifest.toString())
+            const pathNames = psarc.getPathNames()
+
+            const manifestWithPathNames = addPathsToManifest(manifestObj, pathNames)
+
+            fs.writeFileSync('manifest.json', JSON.stringify(manifestWithPathNames, null, 4))
         } catch (error) {
             if (error.code === 'ENOENT') console.error('Error: File not found')
             else console.error(error)
         }
     }
+}
+
+function addPathsToManifest(manifest: any, pathNames: PathName[]): any {
+    for (let key of Object.keys(manifest.Entries)) {
+        const pathName = pathNames.find(x => x.key === key)
+        if (pathName !== undefined) {
+            manifest.Entries[key].Attributes.PathName = pathName.name
+        }
+    }
+
+    return manifest
 }
 
 main()
