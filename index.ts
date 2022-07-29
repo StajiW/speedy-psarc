@@ -136,8 +136,10 @@ class PSARC extends FileReader {
         if (attributes.ArrangementName === 'Vocals') throw 'vocals'
         const properties = attributes.ArrangementProperties
 
-        if (properties.represent === 0)         name += 'Alternate '
-        else if (properties.bonusArr === 1)     name += 'Bonus '
+        if (properties.represent === 0) {
+            if (properties.bonusArr === 1)      name += 'Bonus '
+            else                                name += 'Alternate '                 
+        }
 
         if (properties.pathLead === 1)          name += 'Lead'
         else if (properties.pathRhythm === 1)   name += 'Rhythm'
