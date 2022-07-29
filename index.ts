@@ -113,21 +113,7 @@ class PSARC extends FileReader {
             }
         }
 
-        const uniqueSongKeys: string[] = [...new Set(pathNames.map(x => x.songKey))]
-
-        for (let songKey of uniqueSongKeys) {
-            const songPathNames = pathNames.filter(x => x.songKey === songKey)
-            const uniquePathNames: string[] = [...new Set(songPathNames.map(x => x.name))]
-
-            for (let pathName of uniquePathNames) {
-                const names = songPathNames.filter(x => x.name === pathName)
-                if (names.length <= 1) continue
-    
-                for (let i = 0; i < names.length; i++) {
-                    names[i].name += ` ${i + 1}`
-                }
-            }
-        }
+        this.addDuplicatePathNameNumbers(pathNames)
 
         return pathNames
     }
@@ -161,6 +147,24 @@ class PSARC extends FileReader {
             key: entryKey,
             name: name,
             songKey: attributes.SongKey
+        }
+    }
+
+    private addDuplicatePathNameNumbers(pathNames: PathName[]) {
+        const uniqueSongKeys: string[] = [...new Set(pathNames.map(x => x.songKey))]
+
+        for (let songKey of uniqueSongKeys) {
+            const songPathNames = pathNames.filter(x => x.songKey === songKey)
+            const uniquePathNames: string[] = [...new Set(songPathNames.map(x => x.name))]
+
+            for (let pathName of uniquePathNames) {
+                const names = songPathNames.filter(x => x.name === pathName)
+                if (names.length <= 1) continue
+    
+                for (let i = 0; i < names.length; i++) {
+                    names[i].name += ` ${i + 1}`
+                }
+            }
         }
     }
 
@@ -207,14 +211,19 @@ class PSARC extends FileReader {
         return Buffer.from(res.slice(0, this.toc.length))
     }
 
-    private readBlock(block: Block, sectionSize: number = 0): Buffer {
+    private readBlock(block: Block): Buffer {
         let buffer = Buffer.alloc(0)
 
         let offset = block.fileOffset
 
         for (let i = block.offset; i < this.blockSizes.length; i++) {
             const section = this.buffer.slice(offset, offset + this.blockSizes[i])
-            const sectionUnzipped = unzipSync(section)
+            let sectionUnzipped
+            try {
+                sectionUnzipped = unzipSync(section)
+            } catch (error) {
+                sectionUnzipped = section
+            }
 
             buffer = Buffer.concat([buffer, sectionUnzipped])
 
